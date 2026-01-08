@@ -1,0 +1,33 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: adboard-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: fastapi_app
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+
+volumes:
+  postgres_data:
