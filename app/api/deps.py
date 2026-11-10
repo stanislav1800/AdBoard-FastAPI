@@ -1,13 +1,11 @@
 from typing import Annotated, Optional
 
-from fastapi import Depends, WebSocket
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 import jwt
 
-from app.core.config import settings
-from app.core.exceptions import InvalidAuthenticationCredentialsException, TokenInvalidException, UserIsNotPresentException, UserNotAccessException, UserNotFoundException
+from app.core.exceptions import InvalidAuthenticationCredentialsException, UserIsNotPresentException, UserNotAccessException
 from app.models import Listing, User, UserRoleEnum
-from app.repositories import UserRepository
 from app.services.auth import AuthServiceDep
 from app.services.listing import ListingServiceDep
 
@@ -49,23 +47,6 @@ def require_roles(*roles: UserRoleEnum):
 UserDep = Annotated[User, Depends(get_current_user)]
 AdminDep = Annotated[User, require_roles(UserRoleEnum.ADMIN)]
 CurrentUserOptionalDep = Annotated[Optional[User], Depends(get_current_user_optional)]
-
-
-async def get_current_user_ws(
-    auth: AuthServiceDep,
-    ws: WebSocket,
-    db: UserRepository,
-    token: str
-) -> User:
-    if not token:
-        await ws.close(code=1008)
-        raise TokenInvalidException
-    
-    user = await auth.get_user_from_token(token)
-    if not user:
-        await ws.close(code=1008)
-        raise UserNotFoundException
-    return user
 
 
 async def get_listing_or_404(

@@ -14,6 +14,13 @@ services:
     ports:
       - "5432:5432"
 
+  redis:
+    image: redis:7-alpine
+    container_name: adboard-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
   app:
     build:
       context: .
@@ -25,6 +32,7 @@ services:
       - "8000:8000"
     depends_on:
       - postgres
+      - redis
     volumes:
       - ./:/app
       - ./data:/app/data

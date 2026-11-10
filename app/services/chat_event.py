@@ -6,7 +6,8 @@ from fastapi import BackgroundTasks, Depends
 
 from app.repositories import ChatRepository, ChatRepositoryDep
 from app.services.email import EmailService
-from app.ws.chat import WSEventService, ws_service
+from app.ws.chat import WSEventService
+from app.ws.runtime import WSEventServiceDep
 
 @dataclass
 class MessageCreatedEvent:
@@ -46,7 +47,7 @@ class ChatEventHandler:
                 "chat_id": event.chat_id,
             })
 
-            if self.ws_service.is_user_offline(user.id) and user.email:
+            if user.email and await self.ws_service.is_user_offline(user.id):
                 subject = f"Новое сообщение в чате #{event.chat_id}"
                 body = f"Вы получили новое сообщение:<br><br>{escape(event.text)}"
                 background_tasks.add_task(
@@ -58,6 +59,7 @@ class ChatEventHandler:
 
 def get_chat_event(
     chat_repo: ChatRepositoryDep,
+    ws_service: WSEventServiceDep,
 ) -> ChatEventHandler:
     return ChatEventHandler(
         chat_repo=chat_repo,

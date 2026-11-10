@@ -127,7 +127,7 @@ async def test_no_email_for_online_user():
     ws_service.chat_message = AsyncMock()
     ws_service.chat_list_update = AsyncMock()
     ws_service.unread_update = AsyncMock()
-    ws_service.is_user_offline = Mock(return_value=False)
+    ws_service.is_user_offline = AsyncMock(return_value=False)
 
     email_service = Mock()
     email_service.send = Mock()
@@ -171,7 +171,7 @@ async def test_email_for_offline_user():
     ws_service.chat_message = AsyncMock()
     ws_service.chat_list_update = AsyncMock()
     ws_service.unread_update = AsyncMock()
-    ws_service.is_user_offline = Mock(return_value=True)
+    ws_service.is_user_offline = AsyncMock(return_value=True)
 
     email_service = Mock()
     email_service.send = Mock()
@@ -218,7 +218,7 @@ async def test_ws_notifications_for_all_users():
     ws_service.chat_message = AsyncMock()
     ws_service.chat_list_update = AsyncMock()
     ws_service.unread_update = AsyncMock()
-    ws_service.is_user_offline = Mock(return_value=True)
+    ws_service.is_user_offline = AsyncMock(return_value=True)
 
     email_service = Mock()
 

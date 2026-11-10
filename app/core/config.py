@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     DB_PORT: int
     DB_NAME: str
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
     # logger
     LOG_LEVEL: str = "INFO"
 

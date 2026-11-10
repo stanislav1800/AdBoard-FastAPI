@@ -1,4 +1,5 @@
-from typing import Any, Annotated
+from contextlib import AbstractAsyncContextManager
+from typing import Any, Annotated, Callable
 from collections.abc import AsyncGenerator
 
 from fastapi import Depends
@@ -19,3 +20,14 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, Any]:
         yield session
 
 SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
+
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+
+def get_session_factory() -> SessionFactory:
+    """
+    Для долгоживущих соединений (WebSocket): сессия открывается
+    на время одной операции, а не на всё время соединения.
+    """
+    return async_session
+
+SessionFactoryDep = Annotated[SessionFactory, Depends(get_session_factory)]

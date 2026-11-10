@@ -1,18 +1,24 @@
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
+
+from fakeredis import FakeAsyncRedis, FakeServer
 
 from fastapi.testclient import TestClient
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from httpx_ws import aconnect_ws
+from httpx_ws.transport import ASGIWebSocketTransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncConnection, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.main import app
 from app.core.config import settings
-from app.core.database import get_async_session
+from app.core.database import get_async_session, get_session_factory
 from app.core.security import create_access_token, get_password_hash
 from app.models import Base, User, UserRoleEnum, Chat, Listing, Message
+from app.ws.runtime import start_ws_runtime, stop_ws_runtime
 
 
 test_async_engine = create_async_engine(settings.get_test_db_url(), echo=False, poolclass=NullPool)
@@ -52,9 +58,36 @@ def override_get_session(session):
     async def _override():
         yield session
 
+    @asynccontextmanager
+    async def _session_ctx():
+        # WS-код открывает сессию сам — отдаём ту же тестовую, не закрывая
+        yield session
+
     app.dependency_overrides[get_async_session] = _override
+    app.dependency_overrides[get_session_factory] = lambda: _session_ctx
     yield
     app.dependency_overrides.clear()
+
+# ————————————————————————————————
+# Redis (fakeredis) + WS runtime вместо lifespan
+# ————————————————————————————————
+
+@pytest.fixture
+def redis_server():
+    return FakeServer()
+
+@pytest.fixture
+async def redis(redis_server):
+    client = FakeAsyncRedis(server=redis_server, decode_responses=True)
+    yield client
+    await client.aclose()
+
+@pytest.fixture(autouse=True)
+async def ws_runtime(redis):
+    runtime = await start_ws_runtime(redis)
+    app.state.ws = runtime
+    yield runtime
+    await stop_ws_runtime(runtime)
 
 # ————————————————————————————————
 # 3. HTTP TestClient
@@ -84,33 +117,24 @@ async def async_client(override_get_session):
 
 
 # ————————————————————————————————
-# 5. WebSocket клиент‑фабрика
+# 5. WebSocket клиент (тот же event loop, что и тестовая сессия БД)
 # ————————————————————————————————
 
-# @pytest_asyncio.fixture
-# async def async_client(override_get_session):
-#     app.dependency_overrides[get_async_session] = override_get_session
-#     async with AsyncClient(
-#         transport=ASGITransport(app=app), base_url="https://topok.com"
-#     ) as client:
-#         yield client
-#     app.dependency_overrides.clear()
-
-@pytest_asyncio.fixture
-async def websocket_client(async_client):
-    async with async_client.websocket_connect("/ws/123") as websocket:
-        yield websocket
-
 @pytest.fixture
-def ws_connect(test_client):
+def ws_connect(override_get_session):
     """
-    Возвращает функцию,
-    которая подключается к WebSocket.
-    Пример:
-        ws = ws_connect_factory("/ws/chat/123")
+    async with ws_connect(token) as ws: ...
+    Клиент открывается внутри теста: task group транспорта
+    нельзя закрыть из другой задачи (teardown фикстуры).
     """
-    def _connect(path: str):
-        return test_client.websocket_connect(path)
+    @asynccontextmanager
+    async def _connect(token: str):
+        async with AsyncClient(
+            transport=ASGIWebSocketTransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            async with aconnect_ws(f"/ws?token={token}", client) as ws:
+                yield ws
     return _connect
 
 # ————————————————————————————————

@@ -1,94 +1,48 @@
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketException, status
 
-from app.repositories import UserRepositoryDep
-from app.api.deps import get_current_user_ws
-from .manager import manager
+from app.core.database import SessionFactoryDep
+from .handler import ChatSocketHandler, authenticate_ws
+from .runtime import WSRuntimeDep
 
 router = APIRouter()
 
-@router.websocket("/chat/{chat_id}")
-async def ws_chat(websocket: WebSocket, chat_id: int, db: UserRepositoryDep, token: str = Query(None)):
-    user = await get_current_user_ws(websocket, db, token)
-    if chat_id not in user.chats:
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-    topic = f"chat:{chat_id}"
-    manager.connect(websocket, topic)
+@router.websocket("")
+async def ws_endpoint(
+    websocket: WebSocket,
+    runtime: WSRuntimeDep,
+    session_factory: SessionFactoryDep,
+    token: str | None = Query(None),
+):
+    user = await authenticate_ws(session_factory, token)
+    if not user:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
 
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, topic)
+    await ChatSocketHandler(websocket, user, runtime, session_factory).run()
 
-@router.websocket("/typing/{chat_id}")
-async def ws_typing(ws: WebSocket, chat_id: int, db: UserRepositoryDep):
-    user = await get_current_user_ws(ws, db)
-    if chat_id not in user.chats:
-        await ws.close(code=1008)
-        return
-    await ws.accept()
-    topic = f"typing:{chat_id}"
-    manager.connect(ws, topic)
-
-    try:
-        while True:
-            await ws.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(ws, topic)
-
-@router.websocket("/chat-list")
-async def ws_chat_list(ws: WebSocket, db: UserRepositoryDep):
-    user = await get_current_user_ws(ws, db)
-    await ws.accept()
-    topic = f"chat_list:{user.id}"
-    manager.connect(ws, topic)
-
-    try:
-        while True:
-            await ws.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(ws, topic)
-
-@router.websocket("/unread")
-async def ws_unread(ws: WebSocket, db: UserRepositoryDep):
-    user = await get_current_user_ws(ws, db)
-    await ws.accept()
-    topic = f"unread:{user.id}"
-    await manager.connect(ws, topic)
-
-    try:
-        while True:
-            data = await ws.receive_text()
-            await manager.publish(topic, data)
-    except WebSocketDisconnect:
-        manager.disconnect(ws, topic)
-
-@router.get("/ws", tags=["WebSocket"])
+@router.get("/docs", tags=["WebSocket"])
 def ws_docs():
     """
     ## WebSocket API
 
-    ### 1. Чат конкретного диалога
-    `ws://localhost:8000/ws/chat/{chat_id}`
-    - Топик: chat:{chat_id}
-    - Auth: проверка участия в чате
+    Одно соединение на клиента: `ws://localhost:8000/ws?token=<access_token>`.
+    Невалидный токен — соединение отклоняется с кодом 1008.
 
-    ### 2. Список чатов пользователя
-    `ws://localhost:8000/ws/chat-list`
-    - Топик: chat_list:{user.id}
-    - Auth: JWT в cookie/headers
+    ### Клиент → сервер
+    - `{"action": "subscribe", "chat_id": 5}` — подписка на события чата (проверяется участие)
+    - `{"action": "unsubscribe", "chat_id": 5}`
+    - `{"action": "typing", "chat_id": 5}` — «печатает…» (только для подписанного чата)
+    - `{"action": "ping"}` → `{"type": "pong"}`
 
-    ### 3. Счётчик непрочитанных сообщений
-    `ws://localhost:8000/ws/unread`
-    - Топик: unread:{user.id}
-    - Auth: JWT
+    ### Сервер → клиент
+    Приходят всегда (подписка на пользователя автоматическая):
+    - `{"type": "chat_list_update", "chat_id", "last_message"}`
+    - `{"type": "unread_count", "chat_id"}`
 
-    ### 4. Набор текста (typing)
-    `ws://localhost:8000/ws/typing/{chat_id}`
-    - Топик: typing:{chat_id}
-    - Auth: JWT
+    По подписанным чатам:
+    - `{"type": "new_message", "chat_id", "sender_id", "text"}`
+    - `{"type": "typing", "chat_id", "user_id"}`
+
+    Служебные: `subscribed`, `unsubscribed`, `error` (`action`, `chat_id`, `detail`).
     """
     return {"detail": "WebSocket endpoints"}
