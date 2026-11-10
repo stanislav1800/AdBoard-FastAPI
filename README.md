@@ -1,13 +1,12 @@
 # AdBoard FastAPI
 
-![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green?logo=fastapi)
+![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.124-green?logo=fastapi)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue?logo=postgresql)
 ![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)
-![License](https://img.shields.io/badge/license-MIT-green)
 
 > Платформа объявлений с чатами, рейтингом пользователей и email-уведомлениями.  
-> REST API на FastAPI + WebSocket-чаты + JWT-аутентификация + готовый Docker-деплой.
+> REST API на FastAPI + WebSocket-чаты (Redis Pub/Sub) + фоновые задачи (RabbitMQ) + JWT-аутентификация + готовый Docker-деплой.
 
 ---
 
@@ -41,7 +40,7 @@ AdBoard — это **готовый бэкенд** для запуска соб�
 - 💬 **Встроенные чаты** — покупатель и продавец общаются прямо на платформе, не уходя в сторонние мессенджеры
 - 🏆 **Рейтинг продавцов** — система отзывов формирует доверие между незнакомыми людьми, как на маркетплейсах
 - 🛡 **Модерация** — инструменты для контроля качества объявлений без ручной проверки каждого
-- 📧 **Email-уведомления** — пользователи не теряют важные события (новое сообщение, ответ на объявление)
+- 📧 **Email-уведомления** — пользователи не теряют важные события (новое сообщение, пока пользователь офлайн; результат модерации объявления)
 - 🔌 **API-first** — бэкенд не привязан к конкретному фронтенду, можно запустить на вебе и в мобилке параллельно
 
 ### 🎯 Для кого
@@ -60,11 +59,11 @@ AdBoard — это **готовый бэкенд** для запуска соб�
 | Функция | Описание |
 |---|---|
 | 🔐 Аутентификация | Регистрация, вход, JWT access/refresh токены |
-| 📢 Объявления | Создание, редактирование, удаление, поиск |
-| 💬 Чаты | Реалтайм-общение между пользователями через WebSocket |
+| 📢 Объявления | Создание, редактирование, удаление, загрузка фото, категории |
+| 💬 Чаты | Реалтайм-общение через WebSocket: сообщения, «печатает…», счётчик непрочитанных |
 | ⭐ Избранное | Добавление объявлений в список избранного |
-| 🏆 Рейтинг | Комментарии и оценки пользователей |
-| 📧 Email | Уведомления о ключевых событиях |
+| 🏆 Рейтинг | Оценки и отзывы о пользователях |
+| 📧 Email | Уведомления о новых сообщениях (офлайн-пользователям) и модерации — через очередь задач |
 | 🛡 Модерация | Контроль качества объявлений |
 | 📖 Документация | Автоматическая Swagger / Redoc |
 
@@ -74,12 +73,13 @@ AdBoard — это **готовый бэкенд** для запуска соб�
 
 | Слой | Стек |
 |---|---|
-| Backend | Python 3.11, FastAPI |
+| Backend | Python 3.12, FastAPI |
 | База данных | PostgreSQL 15, SQLAlchemy (async) |
-| Реалтайм | WebSocket |
+| Реалтайм | WebSocket + Redis Pub/Sub |
+| Фоновые задачи | taskiq + RabbitMQ (отправка email) |
 | Миграции | Alembic |
 | Аутентификация | JWT (access + refresh) |
-| Тестирование | Pytest, pytest-asyncio |
+| Тестирование | Pytest, pytest-asyncio, fakeredis, httpx-ws |
 | Инфраструктура | Docker, docker-compose |
 
 ---
@@ -109,6 +109,11 @@ docker compose up -d --build
 | Swagger UI | http://localhost:8000/docs |
 | Redoc | http://localhost:8000/redoc |
 | PostgreSQL | localhost:5432 |
+| Redis | localhost:6379 |
+| RabbitMQ (веб-интерфейс) | http://localhost:15672 (guest / guest) |
+
+Письма отправляет отдельный контейнер `worker` (taskiq): приложение только ставит задачу
+в RabbitMQ, поэтому запрос не ждёт SMTP, а при ошибке отправка повторяется с нарастающей задержкой.
 
 ---
 
@@ -118,14 +123,19 @@ docker compose up -d --build
 
 | Переменная | Пример | Описание |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://user:pass@db/adboard` | Строка подключения к БД |
-| `SECRET_KEY` | `supersecretkey` | Секрет для JWT |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Время жизни access-токена (мин) |
+| `DB_HOST` / `DB_PORT` | `adboard-postgres` / `5432` | Хост и порт PostgreSQL |
+| `DB_USER` / `DB_PASSWORD` | `postgres` / `postgres` | Пользователь и пароль БД |
+| `DB_NAME` | `adboard-fastapi` | Имя базы данных |
+| `SECRET_KEY` | `supersecretkey` | Секрет для подписи JWT |
+| `ACCESS_TOKEN_EXPIRES_MINUTES` | `15` | Время жизни access-токена (мин) |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Время жизни refresh-токена (дни) |
-| `SMTP_HOST` | `smtp.gmail.com` | SMTP-сервер для email |
-| `SMTP_PORT` | `587` | SMTP-порт |
-| `SMTP_USER` | `you@gmail.com` | Email отправителя |
-| `SMTP_PASSWORD` | `password` | Пароль SMTP |
+| `REDIS_URL` | `redis://adboard-redis:6379/0` | Redis: WebSocket pub/sub и онлайн-статус |
+| `RABBITMQ_URL` | `amqp://guest:guest@adboard-rabbitmq:5672/` | Брокер фоновых задач |
+| `TASK_MAX_RETRIES` | `5` | Сколько раз повторять упавшую задачу |
+| `TASK_RETRY_DELAY` | `10` | Базовая задержка перед повтором (сек) |
+| `EMAIL_SERVER` / `EMAIL_PORT` | `smtp.gmail.com` / `587` | SMTP-сервер (STARTTLS) |
+| `EMAIL_USER` / `EMAIL_PASSWORD` | `you@gmail.com` / `password` | Логин и пароль SMTP |
+| `EMAIL_FROM` / `EMAIL_FROM_NAME` | `you@gmail.com` / `AdBoard` | Отправитель писем |
 
 ---
 
@@ -135,16 +145,22 @@ docker compose up -d --build
 AdBoard-FastAPI/
 ├── app/
 │   ├── api/            # REST API эндпоинты (роутеры)
+│   ├── core/           # Настройки, конфиг, подключение к БД, JWT
 │   ├── models/         # SQLAlchemy модели
+│   ├── repositories/   # Доступ к данным (запросы к БД)
 │   ├── schemas/        # Pydantic схемы (запрос / ответ)
-│   ├── services/       # Бизнес-логика (чаты, email и т.д.)
+│   ├── services/       # Бизнес-логика (объявления, чаты, auth)
 │   ├── storage/        # Работа с файлами
-│   └── core/           # Настройки, конфиг, подключение к БД
+│   ├── tasks/          # Фоновые задачи taskiq (отправка email)
+│   ├── ws/             # WebSocket: эндпоинт, Redis pub/sub, онлайн-статус
+│   ├── main.py         # Точка входа FastAPI
+│   └── Dockerfile
 ├── data/               # Загруженные пользователями файлы
 ├── migrations/         # Alembic-миграции
 ├── tests/              # Тесты
-├── Dockerfile
+├── alembic.ini
 ├── docker-compose.yml
+├── pytest.ini
 ├── requirements.txt
 └── .env.example
 ```
@@ -161,18 +177,22 @@ AdBoard-FastAPI/
 Authorization: Bearer <access_token>
 ```
 
-| Эндпоинт | Метод | Описание |
+| Группа | Префикс | Что внутри |
 |---|---|---|
-| `/api/v1/auth/register` | POST | Регистрация |
-| `/api/v1/auth/token` | POST | Получение токенов |
-| `/api/v1/auth/refresh` | POST | Обновление access-токена |
+| Auth | `/api/v1/auth` | `POST /register`, `POST /token`, `POST /token/refresh` |
+| Объявления | `/api/v1/listing` | CRUD, фото, избранное, модерация |
+| Чаты | `/api/v1/chat` | Список чатов, сообщения, непрочитанные |
+| Пользователи | `/api/v1/user` | Профиль `/me`, отзывы `/{id}/comments` |
 
-### Пример: получение токена
+Полный список с параметрами — в Swagger: http://localhost:8000/docs
+
+### Пример: регистрация и получение токена
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"username": "user@example.com", "password": "password"}'
+curl -X POST http://localhost:8000/api/v1/auth/register   -H "Content-Type: application/json"   -d '{"username": "ivan", "password1": "secret", "password2": "secret"}'
+
+# OAuth2 password flow — данные формой, не JSON
+curl -X POST http://localhost:8000/api/v1/auth/token   -d "username=ivan&password=secret"
 ```
 
 ```json
@@ -183,39 +203,62 @@ curl -X POST http://localhost:8000/api/v1/auth/token \
 }
 ```
 
+Обновление токенов: `POST /api/v1/auth/token/refresh` с телом `{"refresh_token": "eyJ..."}`.
+
 ### Пример: создание объявления
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/ads/ \
-  -H "Authorization: Bearer <access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Продам велосипед", "description": "Б/у, хорошее состояние", "price": 5000}'
+curl -X POST http://localhost:8000/api/v1/listing   -H "Authorization: Bearer <access_token>"   -H "Content-Type: application/json"   -d '{"title": "Продам велосипед", "description": "Б/у, хорошее состояние", "price": 5000, "condition": "used", "location": "Kazan", "category_ids": []}'
 ```
+
+Новое объявление получает статус `moderation` и становится публичным после одобрения модератором.
 
 ---
 
 ## 💬 WebSocket (чаты)
 
-Подключение к WebSocket требует валидный JWT-токен в query-параметре:
+Одно соединение на клиента, авторизация access-токеном в query-параметре
+(невалидный токен — соединение отклоняется с кодом `1008`):
 
 ```
-ws://localhost:8000/chat/{chat_id}/?token=<access_token>
+ws://localhost:8000/ws?token=<access_token>
 ```
 
-| Эндпоинт | Описание |
+События рассылаются через Redis Pub/Sub, поэтому работают при нескольких воркерах и инстансах.
+Онлайн-статус пользователя тоже хранится в Redis: письмо о новом сообщении уходит только офлайн-пользователям.
+
+**Клиент → сервер**
+
+| Сообщение | Описание |
 |---|---|
-| `ws://.../chat/{chat_id}/` | Подключение к чату |
-| `ws://.../chat_list/` | Список чатов пользователя |
-| `ws://.../unread_count/` | Количество непрочитанных сообщений |
+| `{"action": "subscribe", "chat_id": 5}` | Подписка на события чата (только для участников) |
+| `{"action": "unsubscribe", "chat_id": 5}` | Отписка от чата |
+| `{"action": "typing", "chat_id": 5}` | «Печатает…» (только в подписанном чате) |
+| `{"action": "ping"}` | Ответ `{"type": "pong"}` |
+
+**Сервер → клиент**
+
+| Событие | Когда приходит |
+|---|---|
+| `new_message` | Новое сообщение в подписанном чате |
+| `typing` | Собеседник печатает в подписанном чате |
+| `chat_list_update` | Новое сообщение в любом чате пользователя (подписка автоматическая) |
+| `unread_count` | Изменились непрочитанные (подписка автоматическая) |
+| `subscribed` / `unsubscribed` / `error` | Ответы на действия клиента |
+
+Подробнее — `GET /ws/docs` в Swagger.
 
 ---
 
 ## 🧪 Тестирование
 
+Тестам нужна отдельная база `adboard_test` на том же сервере PostgreSQL.
+Redis и RabbitMQ не нужны: в тестах используются fakeredis и in-memory брокер задач.
+
 ```bash
+# Один раз: создать тестовую базу
+docker compose exec postgres createdb -U <DB_USER> adboard_test
+
 # Запустить все тесты внутри контейнера
 docker compose exec app pytest
-
-# С отчётом о покрытии
-docker compose exec app pytest --cov=app --cov-report=term-missing
 ```
