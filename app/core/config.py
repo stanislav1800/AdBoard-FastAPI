@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # RabbitMQ
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+    task_max_retries: int = 5
+    task_retry_delay: float = 10
+    task_max_retry_delay: float = 300
+
+    # dev / prod / pytest
+    environment: str = "dev"
+
     # logger
     LOG_LEVEL: str = "INFO"
 

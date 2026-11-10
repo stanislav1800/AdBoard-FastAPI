@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, status, UploadFile, File
 
 from app.schemas import ListingDetail
 from app.schemas.listing import ListingCreate, ListingPatch, ListingPut
@@ -140,9 +140,8 @@ async def change_moderate(
     form: ModerationLogCreate,
     user: UserDep,
     listing_service: ListingServiceDep,
-    background_tasks: BackgroundTasks,
 ):
-    return await listing_service.moderate(listing, form, user, background_tasks)
+    return await listing_service.moderate(listing, form, user)
 
 @router.post(
     '/{id}/favorites',

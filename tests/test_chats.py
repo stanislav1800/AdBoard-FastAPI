@@ -1,5 +1,4 @@
 
-from fastapi import BackgroundTasks
 import pytest
 from unittest.mock import AsyncMock, Mock
 
@@ -129,13 +128,13 @@ async def test_no_email_for_online_user():
     ws_service.unread_update = AsyncMock()
     ws_service.is_user_offline = AsyncMock(return_value=False)
 
-    email_service = Mock()
-    email_service.send = Mock()
+    email_queue = Mock()
+    email_queue.send = AsyncMock()
 
     handler = ChatEventHandler(
         chat_repo=chat_repo,
         ws_service=ws_service,
-        email_service=email_service,
+        email_queue=email_queue,
     )
 
     event = MessageCreatedEvent(
@@ -144,15 +143,13 @@ async def test_no_email_for_online_user():
         text="hi",
     )
 
-    bg = BackgroundTasks()
-
-    await handler.handle_message_created(event, bg)
+    await handler.handle_message_created(event)
 
     ws_service.chat_message.assert_awaited()
     ws_service.chat_list_update.assert_awaited()
     ws_service.unread_update.assert_awaited()
 
-    assert len(bg.tasks) == 0
+    email_queue.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -173,13 +170,13 @@ async def test_email_for_offline_user():
     ws_service.unread_update = AsyncMock()
     ws_service.is_user_offline = AsyncMock(return_value=True)
 
-    email_service = Mock()
-    email_service.send = Mock()
+    email_queue = Mock()
+    email_queue.send = AsyncMock()
 
     handler = ChatEventHandler(
         chat_repo=chat_repo,
         ws_service=ws_service,
-        email_service=email_service,
+        email_queue=email_queue,
     )
 
     event = MessageCreatedEvent(
@@ -188,15 +185,10 @@ async def test_email_for_offline_user():
         text="hi",
     )
 
-    bg = BackgroundTasks()
+    await handler.handle_message_created(event)
 
-    await handler.handle_message_created(event, bg)
-
-    assert len(bg.tasks) == 1
-
-    task = bg.tasks[0]
-    assert task.func is email_service.send
-    assert task.kwargs["recipients"] == ["r@test.com"]
+    email_queue.send.assert_awaited_once()
+    assert email_queue.send.await_args.kwargs["recipients"] == ["r@test.com"]
 
 @pytest.mark.asyncio
 async def test_ws_notifications_for_all_users():
@@ -220,12 +212,13 @@ async def test_ws_notifications_for_all_users():
     ws_service.unread_update = AsyncMock()
     ws_service.is_user_offline = AsyncMock(return_value=True)
 
-    email_service = Mock()
+    email_queue = Mock()
+    email_queue.send = AsyncMock()
 
     handler = ChatEventHandler(
         chat_repo=chat_repo,
         ws_service=ws_service,
-        email_service=email_service,
+        email_queue=email_queue,
     )
 
     event = MessageCreatedEvent(
@@ -234,9 +227,7 @@ async def test_ws_notifications_for_all_users():
         text="hello ws"
     )
 
-    bg = BackgroundTasks()
-
-    await handler.handle_message_created(event, bg)
+    await handler.handle_message_created(event)
 
     ws_service.chat_message.assert_awaited_once_with(
         1,

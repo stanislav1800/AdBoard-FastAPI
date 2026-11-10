@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.api import router as api_router
 from app.ws.router import router as ws_router
 from app.core.logging import setup_logging
+from app.tasks.broker import broker
 from app.ws.runtime import start_ws_runtime, stop_ws_runtime
 
 setup_logging()
@@ -15,7 +16,9 @@ setup_logging()
 async def lifespan(app: FastAPI):
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     app.state.ws = await start_ws_runtime(redis)
+    await broker.startup()
     yield
+    await broker.shutdown()
     await stop_ws_runtime(app.state.ws)
     await redis.aclose()
 

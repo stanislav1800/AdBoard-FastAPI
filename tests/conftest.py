@@ -1,3 +1,7 @@
+import os
+
+os.environ["ENVIRONMENT"] = "pytest"
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock

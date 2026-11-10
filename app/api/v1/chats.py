@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, status, BackgroundTasks
+from fastapi import APIRouter, status
 
 from app.schemas import ChatDetail, MessageCreateAPI
 from app.services.chat import ChatServiceDep
@@ -41,14 +41,13 @@ async def create_message(
     user: UserDep,
     service: ChatServiceDep,
     event_handler: ChatEventHandlerDep,
-    background_tasks: BackgroundTasks,
 ):
     event = await service.create_message(
         chat_id=id,
         sender_id=user.id,
         text=form_data.text,
     )
-    await event_handler.handle_message_created(event, background_tasks)
+    await event_handler.handle_message_created(event)
 
 @router.get(
     "/{id}",
@@ -74,7 +73,6 @@ async def chat_lazy_create(
     user: UserDep,
     chat_service: ChatServiceDep,
     event_handler: ChatEventHandlerDep,
-    background_tasks: BackgroundTasks,
 ):
     event = await chat_service.lazy_create_chat_with_message(
         user_id=user.id,
@@ -82,4 +80,4 @@ async def chat_lazy_create(
         listing_id=listing_id,
         text=form_data.text,
     )
-    await event_handler.handle_message_created(event, background_tasks)
+    await event_handler.handle_message_created(event)

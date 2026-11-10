@@ -1,6 +1,7 @@
 from io import BytesIO
 
 import pytest
+from unittest.mock import AsyncMock
 
 from app.models import Category, Listing, ListingImage
 
@@ -751,3 +752,29 @@ async def test_image_of_hidden_listing_not_public(async_client, auth2_headers, s
 
     resp = await async_client.get(f"/api/v1/listing/{image.id}/images", headers=auth2_headers)
     assert resp.status_code == 404
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action, subject_part", [("active", "прошло"), ("rejected", "отклонено")])
+async def test_moderation_sends_email_via_queue(
+    monkeypatch, session, async_client, moderator_headers, user, listing,
+    action, subject_part,
+):
+    user.email = "owner@test.com"
+    listing.title = "<b>Bike</b>"
+    await session.commit()
+
+    send = AsyncMock()
+    monkeypatch.setattr("app.services.email.EmailService.send", send)
+
+    resp = await async_client.post(
+        f"/api/v1/listing/{listing.id}/moderated",
+        json={"action": action, "reason": "ok"},
+        headers=moderator_headers,
+    )
+    assert resp.status_code == 201
+
+    send.assert_awaited_once()
+    kwargs = send.await_args.kwargs
+    assert kwargs["recipients"] == ["owner@test.com"]
+    assert subject_part in kwargs["subject"]
+    assert "&lt;b&gt;Bike&lt;/b&gt;" in kwargs["body"]

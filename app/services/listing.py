@@ -1,7 +1,7 @@
 from html import escape
 from typing import Annotated, Optional
 
-from fastapi import Depends, BackgroundTasks
+from fastapi import Depends
 
 from app.core.exceptions import ListingAlreadyDeletedException, ListingAlreadyFavoriteException, ListingAlreadyModerateException, ListingNotFoundException, UserNotAccessException
 from app.models import ActionEnum, User, UserRoleEnum, Listing, StatusEnum
@@ -14,7 +14,7 @@ from app.repositories import (ListingFavoriteRepositoryDep,
 )
 from app.schemas.listing import ListingPatch
 from app.services.listing_image import ListingImageService, ListingImageServiceDep
-from app.services.email import EmailService
+from app.tasks.email import EmailQueue, get_email_queue
 
 class ListingService:
     def __init__(
@@ -23,11 +23,13 @@ class ListingService:
         favorite_repo: ListingFavoriteRepository,
         image_service: ListingImageService,
         moderation_repo: ModerationLogRepository,
+        email_queue: EmailQueue,
     ):
         self.listing_repo = listing_repo
         self.favorite_repo = favorite_repo
         self.image_service = image_service
         self.moderation_repo = moderation_repo
+        self.email_queue = email_queue
 
     async def get_or_404(self, id: int):
         listing = await self.listing_repo.get_by_id(id)
@@ -102,7 +104,6 @@ class ListingService:
         listing: Listing,
         data,
         user: User,
-        background_tasks: BackgroundTasks,
     ):
         if listing.status != StatusEnum.MODERATION:
             raise ListingAlreadyModerateException
@@ -128,9 +129,7 @@ class ListingService:
 
         owner = await self.listing_repo.get_owner(listing)
         if owner and owner.email:
-            email_service = EmailService()
-            background_tasks.add_task(
-                email_service.send,
+            await self.email_queue.send(
                 recipients=[owner.email],
                 subject=subject,
                 body=body,
@@ -170,12 +169,14 @@ def get_listing_service(
     favorite_repo: ListingFavoriteRepositoryDep,
     moderation_repo: ModerationLogRepositoryDep,
     image_service: ListingImageServiceDep,
+    email_queue: Annotated[EmailQueue, Depends(get_email_queue)],
 ) -> ListingService:
     return ListingService(
         listing_repo=listing_repo,
         favorite_repo=favorite_repo,
         image_service=image_service,
         moderation_repo=moderation_repo,
+        email_queue=email_queue,
     )
 
 ListingServiceDep = Annotated[ListingService, Depends(get_listing_service)]
