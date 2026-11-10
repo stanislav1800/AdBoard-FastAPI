@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from html import escape
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends
@@ -26,7 +27,6 @@ class ChatEventHandler:
 
     async def handle_message_created(self, event: MessageCreatedEvent, background_tasks: BackgroundTasks):
         participants = await self.chat_repo.get_chat_participants(event.chat_id)
-        print(participants)
         await self.ws_service.chat_message(event.chat_id, {
             "chat_id": event.chat_id,
             "sender_id": event.sender_id,
@@ -48,7 +48,7 @@ class ChatEventHandler:
 
             if self.ws_service.is_user_offline(user.id) and user.email:
                 subject = f"Новое сообщение в чате #{event.chat_id}"
-                body = f"Вы получили новое сообщение:\n\n{event.text}"
+                body = f"Вы получили новое сообщение:<br><br>{escape(event.text)}"
                 background_tasks.add_task(
                     self.email_service.send,
                     recipients=[user.email],

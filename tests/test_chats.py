@@ -57,17 +57,45 @@ async def test_create_message_forbidden(async_client, auth_headers, user3):
 @pytest.mark.asyncio
 async def test_chat_lazy_create(
     async_client,
-    auth_headers,
-    user2,
+    auth2_headers,
+    user,
     listing,
 ):
     payload = {"text": "Hi there!"}
     resp = await async_client.post(
-        f"/api/v1/chat/{listing.id}/{user2.id}",
+        f"/api/v1/chat/{listing.id}/{user.id}",
         json=payload,
-        headers=auth_headers,
+        headers=auth2_headers,
     )
     assert resp.status_code == 201
+
+@pytest.mark.asyncio
+async def test_chat_lazy_create_seller_not_owner(
+    async_client,
+    auth_headers,
+    user2,
+    listing,
+):
+    resp = await async_client.post(
+        f"/api/v1/chat/{listing.id}/{user2.id}",
+        json={"text": "Hi there!"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+@pytest.mark.asyncio
+async def test_chat_lazy_create_with_yourself(
+    async_client,
+    auth_headers,
+    user,
+    listing,
+):
+    resp = await async_client.post(
+        f"/api/v1/chat/{listing.id}/{user.id}",
+        json={"text": "Hi there!"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
 
 @pytest.mark.asyncio
 async def test_get_unread_chats_count(async_client, auth_headers, chat_with_unread_messages):
@@ -236,3 +264,19 @@ async def test_ws_notifications_for_all_users():
         assert call_args.args[0] != sender.id
     for call_args in ws_service.unread_update.await_args_list:
         assert call_args.args[0] != sender.id
+
+
+@pytest.mark.asyncio
+async def test_unread_counts_chats_not_messages(
+    async_client, auth2_headers, session, user, chat_with_unread_messages
+):
+    from app.models import Message
+    session.add_all([
+        Message(chat_id=chat_with_unread_messages.id, sender_id=user.id, text="2", is_read=False),
+        Message(chat_id=chat_with_unread_messages.id, sender_id=user.id, text="3", is_read=False),
+    ])
+    await session.commit()
+
+    resp = await async_client.get("/api/v1/chat/unread", headers=auth2_headers)
+    assert resp.status_code == 200
+    assert resp.json()["unread_chats_count"] == 1

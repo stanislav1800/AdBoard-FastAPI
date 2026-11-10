@@ -2,6 +2,8 @@ from io import BytesIO
 
 import pytest
 
+from app.models import Category, Listing, ListingImage
+
 @pytest.mark.asyncio
 async def test_create_listing(async_client, auth_headers):
     payload = {
@@ -661,3 +663,91 @@ async def test_remove_non_existing_favorite(
 async def test_favorite_requires_auth(async_client):
     resp = await async_client.post("/api/v1/listing/1/favorites")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_listing_detail(async_client, auth_headers, listing):
+    resp = await async_client.get(f"/api/v1/listing/{listing.id}", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["id"] == listing.id
+
+@pytest.mark.asyncio
+async def test_patch_listing_categories(async_client, auth_headers, session, listing):
+    cat1 = Category(name="Phones", slug="phones", order=1)
+    cat2 = Category(name="Laptops", slug="laptops", order=2)
+    session.add_all([cat1, cat2])
+    await session.commit()
+
+    resp = await async_client.patch(
+        f"/api/v1/listing/{listing.id}",
+        json={"categories": [cat1.id, cat2.id]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert {c["id"] for c in resp.json()["categories"]} == {cat1.id, cat2.id}
+
+    resp = await async_client.patch(
+        f"/api/v1/listing/{listing.id}",
+        json={"categories": [cat2.id]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert [c["id"] for c in resp.json()["categories"]] == [cat2.id]
+
+@pytest.mark.asyncio
+async def test_uploaded_files_get_unique_safe_names(async_client, auth_headers, listing):
+    files = [
+        ("files", ("../../evil.jpg", BytesIO(b"image1"), "image/jpeg")),
+        ("files", ("../../evil.jpg", BytesIO(b"image2"), "image/jpeg")),
+    ]
+    resp = await async_client.post(
+        f"/api/v1/listing/{listing.id}/images",
+        files=files,
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+
+    paths = [img["image"] for img in resp.json()]
+    assert len(set(paths)) == 2
+    assert all(".." not in p and "/" not in p for p in paths)
+
+@pytest.mark.asyncio
+async def test_cannot_set_primary_image_of_other_listing(
+    async_client, auth_headers, session, listing, user2
+):
+    foreign = Listing(title="Foreign", description="d", price=1, condition="new", location="City", user_id=user2.id)
+    session.add(foreign)
+    await session.commit()
+    image = ListingImage(listing_id=foreign.id, image="x.jpg", order=1, is_primary=False)
+    session.add(image)
+    await session.commit()
+
+    resp = await async_client.post(
+        f"/api/v1/listing/{listing.id}/images/{image.id}/primary",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+    await session.refresh(image)
+    assert image.is_primary is False
+
+@pytest.mark.asyncio
+async def test_owner_can_delete_image(async_client, auth_headers, auth2_headers, session, listing):
+    image = ListingImage(listing_id=listing.id, image="missing.jpg", order=1, is_primary=True)
+    session.add(image)
+    await session.commit()
+
+    resp = await async_client.delete(f"/api/v1/listing/images/{image.id}", headers=auth2_headers)
+    assert resp.status_code == 403
+
+    resp = await async_client.delete(f"/api/v1/listing/images/{image.id}", headers=auth_headers)
+    assert resp.status_code == 204
+
+@pytest.mark.asyncio
+async def test_image_of_hidden_listing_not_public(async_client, auth2_headers, session, listing):
+    image = ListingImage(listing_id=listing.id, image="x.jpg", order=1, is_primary=True)
+    session.add(image)
+    await session.commit()
+
+    resp = await async_client.get(f"/api/v1/listing/{image.id}/images", headers=auth2_headers)
+    assert resp.status_code == 404

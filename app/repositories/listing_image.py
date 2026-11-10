@@ -39,7 +39,7 @@ class ListingImageRepository(BaseRepository[ListingImage]):
         )
         await self.db.execute(
             update(ListingImage)
-            .where(ListingImage.id == image_id)
+            .where(ListingImage.id == image_id, ListingImage.listing_id == listing_id)
             .values(is_primary=True)
         )
         await self.db.commit()

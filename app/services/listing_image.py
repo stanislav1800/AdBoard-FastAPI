@@ -41,6 +41,9 @@ class ListingImageService:
 
     async def set_primary(self, listing_id: int, image_id: int):
         """Сделать изображение primary"""
+        image = await self.get_image(image_id)
+        if image.listing_id != listing_id:
+            raise ImageNotFoundException
         await self.repo.set_primary(listing_id, image_id)
 
     async def delete_image(self, image: ListingImage):

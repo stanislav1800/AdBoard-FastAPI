@@ -4,8 +4,8 @@ from fastapi import Depends
 import jwt
 
 from app.core.config import settings
-from app.core.exceptions import IncorrectUsernameOrPasswordException, InvalidRefreshTokenException, PasswordsNotMatchException, RefreshTokenExpiredException, UserAlreadyExistsException, UserNotFoundException
-from app.core.security import create_access_token, create_refresh_token, get_password_hash, verify_token, decode_jwt_token
+from app.core.exceptions import IncorrectUsernameOrPasswordException, InvalidRefreshTokenException, PasswordsNotMatchException, RefreshTokenExpiredException, UserAlreadyExistsException, UserInactiveException, UserNotFoundException
+from app.core.security import REFRESH_TOKEN_TYPE, create_access_token, create_refresh_token, decode_jwt_token
 from app.models import User
 from app.repositories import UserRepositoryDep, UserRepository
 from app.schemas import Token, UserAuthenticate, UserCreate
@@ -24,12 +24,14 @@ class AuthService:
             raise PasswordsNotMatchException
 
         user = await self.user_repo.create(user_data)
-        # return user
+        return user
     
     async def authenticate_user(self, username: str, password: str) -> User:
         user = await self.user_repo.authenticate(UserAuthenticate(username=username, password=password))
         if not user:
             raise IncorrectUsernameOrPasswordException
+        if not user.is_active:
+            raise UserInactiveException
         return user
     
     async def refresh_tokens(self, refresh_token: str) -> Token:
@@ -37,16 +39,21 @@ class AuthService:
         Бизнес‑логика обновления токенов.
         """
         try:
-            payload = decode_jwt_token(refresh_token)
+            payload = decode_jwt_token(refresh_token, token_type=REFRESH_TOKEN_TYPE)
             user_id = payload.get("sub")
         except jwt.ExpiredSignatureError:
             raise RefreshTokenExpiredException
         except jwt.PyJWTError:
             raise InvalidRefreshTokenException
 
+        if not user_id:
+            raise InvalidRefreshTokenException
+
         user = await self.user_repo.get_by_id(int(user_id))
         if not user:
             raise UserNotFoundException
+        if not user.is_active:
+            raise UserInactiveException
         return user
 
     async def create_tokens_for_user(self, user: User):
@@ -56,19 +63,15 @@ class AuthService:
             token_type="bearer",
         )
 
-    async def get_current_user(self, token: str):
-        token_data = verify_token(token)
-        user = await self.user_repo.get_by_id(int(token_data.user_id))
-        if not user:
-            raise UserNotFoundException
-        return user
-
     async def get_user_from_token(self, token: str):
         payload = decode_jwt_token(token)
         user_id = payload.get("sub")
         if not user_id:
             return None
-        return await self.user_repo.get_by_id(int(user_id))
+        user = await self.user_repo.get_by_id(int(user_id))
+        if not user or not user.is_active:
+            return None
+        return user
 
 def get_auth_service(
     user_repo: UserRepositoryDep,

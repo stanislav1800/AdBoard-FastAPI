@@ -57,7 +57,7 @@ class ChatRepository(BaseRepository[Chat]):
             .options(
                 selectinload(self.model.messages),
                 selectinload(self.model.participants),
-                selectinload(self.model.listing),
+                selectinload(self.model.listing).selectinload(Listing.listing_images),
             )
         )
 
@@ -94,8 +94,8 @@ class ChatRepository(BaseRepository[Chat]):
         MessageAlias = aliased(Message)
         ParticipantAlias = aliased(User)
 
-        stmt = (
-            select(func.count(Chat.id))
+        unread_chats = (
+            select(Chat.id)
             .join(Chat.participants.of_type(ParticipantAlias))
             .outerjoin(MessageAlias, MessageAlias.chat_id == Chat.id)
             .where(ParticipantAlias.id == request_user_id)
@@ -117,7 +117,9 @@ class ChatRepository(BaseRepository[Chat]):
                     0
                 ) > 0
             )
+            .subquery()
         )
+        stmt = select(func.count()).select_from(unread_chats)
 
         result = await self.db.execute(stmt)
         return result.scalar() or 0

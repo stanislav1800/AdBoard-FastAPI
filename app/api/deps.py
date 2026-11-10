@@ -34,8 +34,10 @@ async def get_current_user_optional(
 ) -> Optional[User]:
     if not token:
         return None
-    user = await auth.get_user_from_token(token)
-    return user
+    try:
+        return await auth.get_user_from_token(token)
+    except jwt.PyJWTError:
+        raise InvalidAuthenticationCredentialsException
 
 def require_roles(*roles: UserRoleEnum):
     async def _dependency(user: User = Depends(get_current_user)):

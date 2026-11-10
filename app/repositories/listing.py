@@ -3,11 +3,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from .base import BaseRepository
-from app.models import Category, ListingFavorite, ListingImage, Listing, StatusEnum
+from app.models import Category, ListingFavorite, ListingImage, Listing, StatusEnum, User
 from app.schemas.listing import ListingCreate
 
 class ListingRepository(BaseRepository[Listing]):
-    m2m_fields = {"categories"}
+    m2m_fields = {"categories": Category}
 
     def _base_query(self):
         return (
@@ -38,6 +38,16 @@ class ListingRepository(BaseRepository[Listing]):
         )
 
         return listing
+
+    async def get_detail(self, listing_id: int) -> Listing | None:
+        return await self.get_by_id(listing_id)
+
+    async def update(self, obj: Listing, obj_in, exclude_unset: bool = False) -> Listing:
+        listing = await super().update(obj, obj_in, exclude_unset=exclude_unset)
+        return await self.get_by_id(listing.id)
+
+    async def get_owner(self, listing: Listing) -> User | None:
+        return await self.db.get(User, listing.user_id)
     
     async def get_listings(self, status: StatusEnum) -> list[Listing]:
         stmt = (

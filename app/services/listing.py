@@ -1,9 +1,10 @@
+from html import escape
 from typing import Annotated, Optional
 
 from fastapi import Depends, BackgroundTasks
 
 from app.core.exceptions import ListingAlreadyDeletedException, ListingAlreadyFavoriteException, ListingAlreadyModerateException, ListingNotFoundException, UserNotAccessException
-from app.models import User, UserRoleEnum, Listing, StatusEnum
+from app.models import ActionEnum, User, UserRoleEnum, Listing, StatusEnum
 from app.repositories import (ListingFavoriteRepositoryDep,
     ListingRepositoryDep,
     ModerationLogRepositoryDep,
@@ -81,16 +82,19 @@ class ListingService:
     async def upload_images(self, listing: Listing, files):
         return await self.image_service.upload(listing, files)
 
-    async def get_image(self, image_id: int):
-        return await self.image_service.get_image(image_id)
+    async def get_image(self, image_id: int, user: User | None):
+        image = await self.image_service.get_image(image_id)
+        listing = await self.get_or_404(image.listing_id)
+        await self.ensure_public(listing, user)
+        return image
 
     async def make_primary(self, listing: Listing, image_id: int):
         return await self.image_service.set_primary(listing.id, image_id)
 
     async def delete_image(self, image_id: int, user: User):
         image = await self.image_service.get_image(image_id)
-        if image.listing.user_id != user.id:
-            raise UserNotAccessException
+        listing = await self.get_or_404(image.listing_id)
+        await self.ensure_owner(listing, user)
         return await self.image_service.delete_image(image)
 
     async def moderate(
@@ -103,7 +107,7 @@ class ListingService:
         if listing.status != StatusEnum.MODERATION:
             raise ListingAlreadyModerateException
 
-        form_data = ListingPatch(status=data.action)
+        form_data = ListingPatch(status=StatusEnum(data.action.value))
         updated = await self.listing_repo.update(listing, form_data, exclude_unset=True)
 
         data.moderator_id = user.id
@@ -112,21 +116,22 @@ class ListingService:
 
         # собираем email шаблон
         subject = "Ваше объявление прошло модерацию"
-        if data.action == StatusEnum.REJECTED:
+        if data.action == ActionEnum.REJECTED:
             subject = "Ваше объявление отклонено на модерации"
             
         body = f"""
             <p>Здравствуйте!</p>
-            <p>Ваше объявление <strong>{listing.title}</strong> 
+            <p>Ваше объявление <strong>{escape(listing.title)}</strong> 
             было проверено модератором.</p>
             <p>Результат: <strong>{data.action.name.lower()}</strong>.</p>
         """
 
-        if listing.user.email:
+        owner = await self.listing_repo.get_owner(listing)
+        if owner and owner.email:
             email_service = EmailService()
             background_tasks.add_task(
                 email_service.send,
-                recipients=[listing.user.email],
+                recipients=[owner.email],
                 subject=subject,
                 body=body,
             )

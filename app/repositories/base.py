@@ -14,7 +14,7 @@ RepoType = TypeVar("RepoType", bound="BaseRepository")
 
 class BaseRepository(Generic[ModelType]):
     model: Type[ModelType]
-    m2m_fields: set[str] = set()
+    m2m_fields: dict[str, Type[Base]] = {}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -81,9 +81,11 @@ class BaseRepository(Generic[ModelType]):
                 if value is None:
                     continue
 
-                relation = getattr(obj, key)
-                relation.clear()
-                relation.extend(value)
+                related_model = self.m2m_fields[key]
+                related = await self.db.scalars(
+                    select(related_model).where(related_model.id.in_(value))
+                )
+                setattr(obj, key, list(related))
 
             else:
                 setattr(obj, key, value)

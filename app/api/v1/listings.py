@@ -99,9 +99,10 @@ async def upload_images(
 )
 async def get_listing_image(
     image_id: int,
+    user: CurrentUserOptionalDep,
     listing_service: ListingServiceDep,
 ):
-    return await listing_service.get_image(image_id)
+    return await listing_service.get_image(image_id, user)
 
 @router.post(
     "/{id}/images/{image_id}/primary",

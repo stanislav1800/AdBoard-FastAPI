@@ -3,10 +3,11 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from app.core.exceptions import ChatNotFoundException, UserNotAccessException
+from app.core.exceptions import ChatNotFoundException, ChatWithYourselfException, ListingNotFoundException, UserNotAccessException
 from app.models.user import User
-from app.repositories import ChatRepositoryDep, MessageRepositoryDep
+from app.repositories import ChatRepositoryDep, ListingRepositoryDep, MessageRepositoryDep
 from app.repositories.chat import ChatRepository
+from app.repositories.listing import ListingRepository
 from app.repositories.message import MessageRepository
 from app.schemas.message import MessageDBCreate
 from app.services.chat_event import MessageCreatedEvent
@@ -14,9 +15,15 @@ from app.services.chat_event import MessageCreatedEvent
 logger = logging.getLogger()
 
 class ChatService:
-    def __init__(self, message_repo: MessageRepository, chat_repo: ChatRepository):
+    def __init__(
+        self,
+        message_repo: MessageRepository,
+        chat_repo: ChatRepository,
+        listing_repo: ListingRepository,
+    ):
         self.message_repo = message_repo
         self.chat_repo = chat_repo
+        self.listing_repo = listing_repo
 
     async def create_message(self,
         chat_id: int,
@@ -47,6 +54,13 @@ class ChatService:
         listing_id: int,
         text: str,
     ):
+        if user_id == seller_id:
+            raise ChatWithYourselfException
+
+        listing = await self.listing_repo.get_by_id(listing_id)
+        if not listing or listing.user_id != seller_id:
+            raise ListingNotFoundException
+
         chat = await self.chat_repo.chat_lazy_create(user_id, seller_id, listing_id)
         await self.message_repo.create(MessageDBCreate(chat_id=chat.id, sender_id=user_id, text=text))
 
@@ -77,7 +91,8 @@ class ChatService:
 def get_chat_service(
     message_repo: MessageRepositoryDep,
     chat_repo: ChatRepositoryDep,
+    listing_repo: ListingRepositoryDep,
 ) -> ChatService:
-    return ChatService(message_repo, chat_repo)
+    return ChatService(message_repo, chat_repo, listing_repo)
 
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

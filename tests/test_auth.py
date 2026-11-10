@@ -2,7 +2,7 @@
 import pytest
 from fastapi import status
 
-from app.core.security import create_refresh_token
+from app.core.security import create_access_token, create_refresh_token
 
 @pytest.mark.asyncio
 async def test_register_user(async_client):
@@ -86,3 +86,47 @@ async def test_token_refresh_invalid(async_client):
 
     data = resp.json()
     assert data["detail"] == "Недопустимый refresh token"
+
+
+@pytest.mark.asyncio
+async def test_register_returns_user(async_client):
+    resp = await async_client.post(
+        "/api/v1/auth/register",
+        json={"username": "new_user", "password1": "pass", "password2": "pass"},
+    )
+    assert resp.status_code == status.HTTP_201_CREATED
+    assert resp.json()["username"] == "new_user"
+
+@pytest.mark.asyncio
+async def test_refresh_token_not_accepted_as_access(async_client, user):
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+    resp = await async_client.get(
+        "/api/v1/user/me",
+        headers={"Authorization": f"Bearer {refresh_token}"},
+    )
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+@pytest.mark.asyncio
+async def test_access_token_not_accepted_as_refresh(async_client, user):
+    access_token = create_access_token({"sub": str(user.id)})
+    resp = await async_client.post("/api/v1/auth/token/refresh", json={"refresh_token": access_token})
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+@pytest.mark.asyncio
+async def test_inactive_user_cannot_login_or_use_token(async_client, session, user, auth_headers):
+    user.is_active = False
+    await session.commit()
+
+    resp = await async_client.post("/api/v1/auth/token", data={"username": "user", "password": "user"})
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    resp = await async_client.get("/api/v1/user/me", headers=auth_headers)
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+@pytest.mark.asyncio
+async def test_invalid_token_on_public_endpoint_is_401(async_client, listing):
+    resp = await async_client.get(
+        f"/api/v1/listing/{listing.id}",
+        headers={"Authorization": "Bearer invalidtoken"},
+    )
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED

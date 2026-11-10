@@ -20,4 +20,4 @@ app.include_router(ws_router, prefix="/ws")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    uvicorn.run(app, host=settings.api_host, port=settings.api_port)

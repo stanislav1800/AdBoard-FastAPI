@@ -2,13 +2,14 @@
 from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.schemas import UserCreate, RefreshTokenRequest, Token
+from app.schemas import UserCreate, UserDetail, RefreshTokenRequest, Token
 from app.services.auth import AuthServiceDep
 
 router = APIRouter()
 
 @router.post(
     '/register',
+    response_model=UserDetail,
     status_code=status.HTTP_201_CREATED,
 )
 async def register(
